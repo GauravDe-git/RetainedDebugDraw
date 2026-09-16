@@ -72,3 +72,24 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Rider / JetBrains
+.idea/
+.idea.*/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+
+# New UE solution format (5.6+) — not covered by *.sln
+*.slnx
+Automation_*.slnx
+.vsconfig
+
+# Crash dumps
+*.stackdump
+*.dmp
+
+# OS
+.DS_Store
+Thumbs.db
