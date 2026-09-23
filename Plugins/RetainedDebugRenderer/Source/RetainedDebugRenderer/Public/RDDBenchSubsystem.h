@@ -20,6 +20,7 @@ public:
 	
 	void SetStockLineCount(int32 Count);
 	void StartCapture(int32 NumFrames);
+	void SnapToBenchCamera();
 private:
 	void EmitStockLines();
 	void SampleFrame(float DeltaTime);

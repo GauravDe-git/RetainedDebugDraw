@@ -6,6 +6,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Camera/CameraActor.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 
 namespace
 {
@@ -86,6 +89,45 @@ void URDDBenchSubsystem::StartCapture(int32 NumFrames)
 	bCapturing = true; 
 	
 	UE_LOG(LogTemp, Warning, TEXT("RDD capture started: %d frames"), FramesRemaining);
+}
+
+void URDDBenchSubsystem::SnapToBenchCamera()
+{
+	check(IsInGameThread());
+	
+	UWorld* World = GetWorld();
+	if (!World) return;
+	
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RDD: no player controller yet"));
+		return;
+	}
+	
+	ACameraActor* BenchCam = nullptr;
+	for (TActorIterator<ACameraActor> It(World); It; ++It)
+	{
+		if (It->ActorHasTag(TEXT("RDDBenchCam")))
+		{
+			BenchCam = *It;
+			break;
+		}
+	}
+	if (!BenchCam)
+	{
+		UE_LOG(LogTemp, Error, TEXT("RDD: no CameraActor tagged 'RDDBenchCam' found"));
+		return;
+	}
+	
+	PC->SetViewTargetWithBlend(BenchCam, 0.f);
+	PC->SetIgnoreMoveInput(true);
+	PC->SetIgnoreLookInput(true);
+	
+	const FVector Loc = BenchCam->GetActorLocation();
+	const FRotator Rot = BenchCam->GetActorRotation();
+	UE_LOG(LogTemp, Warning, TEXT("RDD: camera locked at %s / %s"),
+		   *Loc.ToString(), *Rot.ToString());
 }
 
 void URDDBenchSubsystem::SampleFrame(float DeltaTime)
@@ -198,5 +240,18 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDBenchReport(
 			{
 				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 300;
 				Sub->StartCapture(N);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDBenchSetCamera(
+	TEXT("RDD.Bench.SetCamera"),
+	TEXT("Snap to the CameraActor tagged RDDBenchCam and lock input."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				Sub->SnapToBenchCamera();
 			}
 		}));
