@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "RetainedDebugRenderer",
+	"Description": "Debug drawing plugin for unreal in Retained Mode with handle based submission.",
+	"Category": "Other",
+	"CreatedBy": "Gaurav De",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "RetainedDebugRenderer",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
