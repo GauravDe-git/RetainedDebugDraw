@@ -19,10 +19,21 @@ public:
 	virtual TStatId GetStatId() const override;
 	
 	void SetStockLineCount(int32 Count);
+	void StartCapture(int32 NumFrames);
 private:
 	void EmitStockLines();
+	void SampleFrame(float DeltaTime);
+	void FinishCapture();
 	
 	int32 StockLineCount = 0;
+	
+	bool bCapturing = false;
+	int32 FramesRemaining = 0;
+	
+	TArray<float> FrameSamples;
+	TArray<float> GameSamples;
+	TArray<float> RenderSamples; 
+	TArray<float> GPUSamples;
 	
 	static constexpr int32 RDDSeed = 12345; 
 };
