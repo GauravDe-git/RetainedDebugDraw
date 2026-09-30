@@ -38,21 +38,25 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	check(IsInGameThread());
 	
-	if (StockLineCount > 0)
-	{
-		EmitStockLines();
-	}
+	if (StockLineCount > 0)   { EmitStockLines(); }
+	if (StockBoxCount > 0)    { EmitStockBoxes(); }
+	if (StockSphereCount > 0) { EmitStockSpheres(); }
 	
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			1, 0.f, FColor::Yellow, 
-			FString::Printf(TEXT("Retained Draw | mode : STOCK | lines: %d"), StockLineCount));
+			FString::Printf(TEXT("Retained Draw | STOCK | L:%d B:%d S:%d"),
+				StockLineCount, StockBoxCount, StockSphereCount));
 	}
 	
 	if (bCapturing)
 	{
 		SampleFrame(DeltaTime);
+		if (FramesRemaining % 50 == 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("RDD capture: %d frames left"), FramesRemaining);
+		}
 		if (--FramesRemaining <= 0)
 		{
 			FinishCapture();
@@ -69,6 +73,75 @@ void URDDBenchSubsystem::SetStockLineCount(int32 Count)
 {
 	check(IsInGameThread()); 
 	StockLineCount = FMath::Max(0, Count);
+}
+
+void URDDBenchSubsystem::SetStockBoxCount(int32 Count)
+{
+	check(IsInGameThread());
+	StockBoxCount = FMath::Max(0, Count);
+}
+
+void URDDBenchSubsystem::SetStockSphereCount(int32 Count)
+{
+	check(IsInGameThread());
+	StockSphereCount = FMath::Max(0, Count);
+}
+
+void URDDBenchSubsystem::ClearAll()
+{
+	check(IsInGameThread());
+	StockLineCount = 0;
+	StockBoxCount = 0;
+	StockSphereCount = 0;
+
+	if (UWorld* World = GetWorld())
+	{
+		FlushPersistentDebugLines(World);
+	}
+}
+
+void URDDBenchSubsystem::EmitStockBoxes()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(RDD_EmitStockBoxes);
+
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	FRandomStream Rand(RDDSeed);
+
+	for (int32 i = 0; i < StockBoxCount; ++i)
+	{
+		const FVector Center = Rand.GetUnitVector() * Rand.FRandRange(200.f, 3000.f);
+		const FVector Extent(Rand.FRandRange(20.f, 60.f));
+
+		DrawDebugBox(World, Center, Extent, FColor(170, 0, 0),
+					 /*bPersistentLines=*/false,
+					 /*LifeTime=*/-1.f,
+					 /*DepthPriority=*/0,
+					 /*Thickness=*/0.f);
+	}
+}
+
+void URDDBenchSubsystem::EmitStockSpheres()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(RDD_EmitStockSpheres);
+
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	FRandomStream Rand(RDDSeed);
+
+	for (int32 i = 0; i < StockSphereCount; ++i)
+	{
+		const FVector Center = Rand.GetUnitVector() * Rand.FRandRange(200.f, 3000.f);
+
+		DrawDebugSphere(World, Center, Rand.FRandRange(20.f, 60.f),
+						/*Segments=*/12, FColor(170, 0, 0),
+						/*bPersistentLines=*/false,
+						/*LifeTime=*/-1.f,
+						/*DepthPriority=*/0,
+						/*Thickness=*/0.f);
+	}
 }
 
 void URDDBenchSubsystem::StartCapture(int32 NumFrames)
@@ -138,9 +211,6 @@ void URDDBenchSubsystem::SampleFrame(float DeltaTime)
 	// Query GPU 0 cycle time and convert to milliseconds:
 	const float GPUMs    = FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles(0));
 	
-	// console command: state unit's Frame is max of the 3
-	const float FrameMs = FMath::Max3(GameMs, RenderMs, GPUMs);
-	
 	FrameSamples.Add(DeltaTime * 1000.f);
 	GameSamples.Add(GameMs);
 	RenderSamples.Add(RenderMs);
@@ -164,16 +234,18 @@ void URDDBenchSubsystem::FinishCapture()
 	if (!IFileManager::Get().FileExists(*Path))
 	{
 		FFileHelper::SaveStringToFile(
-			TEXT("Timestamp,Mode,Count,Frames,")
+			TEXT("Timestamp,Mode,Lines,Boxes,Spheres,Frames,")
 			TEXT("FrameMean,FrameSD,GameMean,GameSD,")
 			TEXT("RenderMean,RenderSD,GPUMean,GPUSD\n"),
 			*Path);
 	}
 
 	const FString Row = FString::Printf(
-		TEXT("%s,STOCK,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
+			TEXT("%s,STOCK,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
 		*FDateTime::Now().ToString(),
 		StockLineCount,
+		StockBoxCount,
+		StockSphereCount,
 		FrameSamples.Num(),
 		FrameMean, FrameSD, GameMean, GameSD,
 		RenderMean, RenderSD, GPUMean, GPUSD);
@@ -228,6 +300,50 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressLines(
 		}
 		)
 );
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressBoxes(
+	TEXT("RDD.Stress.Boxes"),
+	TEXT("Emit N stock DrawDebugBox calls per frame. Usage: RDD.Stress.Boxes <N>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+				Sub->SetStockBoxCount(N);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Boxes -> %d"), N);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressSpheres(
+	TEXT("RDD.Stress.Spheres"),
+	TEXT("Emit N stock DrawDebugSphere calls per frame. Usage: RDD.Stress.Spheres <N>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+				Sub->SetStockSphereCount(N);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Spheres -> %d"), N);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressClear(
+	TEXT("RDD.Stress.Clear"),
+	TEXT("Clear all stock shape counts and flush persistent debug lines."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				Sub->ClearAll();
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Clear"));
+			}
+		}));
 
 static FAutoConsoleCommandWithWorldAndArgs GRDDBenchReport(
 	TEXT("RDD.Bench.Report"),

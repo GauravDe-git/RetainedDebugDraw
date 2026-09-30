@@ -19,14 +19,23 @@ public:
 	virtual TStatId GetStatId() const override;
 	
 	void SetStockLineCount(int32 Count);
+	void SetStockBoxCount(int32 Count);
+	void SetStockSphereCount(int32 Count);
+	void ClearAll();
+	
 	void StartCapture(int32 NumFrames);
 	void SnapToBenchCamera();
 private:
 	void EmitStockLines();
+	void EmitStockBoxes();
+	void EmitStockSpheres();
+	
 	void SampleFrame(float DeltaTime);
 	void FinishCapture();
 	
 	int32 StockLineCount = 0;
+	int32 StockBoxCount = 0;
+	int32 StockSphereCount = 0;
 	
 	bool bCapturing = false;
 	int32 FramesRemaining = 0;
