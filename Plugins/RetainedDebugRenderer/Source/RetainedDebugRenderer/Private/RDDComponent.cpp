@@ -2,6 +2,7 @@
 
 #include "RDDComponent.h"
 
+#include "RDDSceneProxy.h"
 #include "Engine/CollisionProfile.h"
 
 // Sets default values for this component's properties
@@ -46,9 +47,7 @@ int32 URDDComponent::GetNumLines() const
 
 FPrimitiveSceneProxy* URDDComponent::CreateSceneProxy()
 {
-	// #14 replaces this with: return new FRDDSceneProxy(this);
-	// Returning nullptr is valid — the component simply has nothing to render yet.
-	return nullptr;
+	return new FRDDSceneProxy(this);
 }
 
 FBoxSphereBounds URDDComponent::CalcBounds(const FTransform& LocalToWorld) const

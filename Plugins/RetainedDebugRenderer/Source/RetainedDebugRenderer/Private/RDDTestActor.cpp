@@ -41,8 +41,8 @@ void ARDDTestActor::Tick(float DeltaTime)
 	if (Timer >= 1.f && SpokesAdded < 12)
 	{
 		Timer = 0.f;
-
-		const float Angle = SpokesAdded * (2.f * PI / 12.f);
+		
+		const float Angle = (SpokesAdded + 0.5f) * (2.f * PI / 12.f);
 		const FVector O = GetActorLocation();
 		const FVector Tip = O + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * 300.f;
 
