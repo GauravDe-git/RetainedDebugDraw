@@ -5,15 +5,40 @@
 #include "PrimitiveDrawInterface.h"
 #include "PrimitiveDrawingUtils.h"
 #include "PrimitiveViewRelevance.h"
+#include "RenderResource.h"
 #include "SceneView.h"
 #include "UObject/GarbageCollectionSchema.h"
+
+static TAutoConsoleVariable<int32> CVarRDDDrawPDI(
+	TEXT("RDD.DrawPDI"), 1,
+	TEXT("1 = draw via the PDI path. 0 = skip drawing, to isolate buffer memory."),
+	ECVF_RenderThreadSafe);
 
 FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	: FPrimitiveSceneProxy{InComponent}
 	, Lines{InComponent->GetLines()}	// this is a full copy, not reference
 {
 	bWillEverBeLit = false;
-	UE_LOG(LogTemp, Warning, TEXT("RDD proxy created with %d lines"), Lines.Num());
+	
+	NumVertices = Lines.Num() * 2;
+	if (NumVertices > 0)
+	{
+		BuildVertexBuffers();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("RDD proxy created: %d lines, %u vertices"),
+		   Lines.Num(), NumVertices);
+}
+
+FRDDSceneProxy::~FRDDSceneProxy()
+{
+	// Proxies are deleted on the render thread, after the renderer has
+	// finished with them, so releasing GPU resources here is safe.
+	check(IsInParallelRenderingThread());
+
+	VertexBuffers.PositionVertexBuffer.ReleaseResource();
+	VertexBuffers.ColorVertexBuffer.ReleaseResource();
+	VertexBuffers.StaticMeshVertexBuffer.ReleaseResource();
 }
 
 SIZE_T FRDDSceneProxy::GetTypeHash() const
@@ -30,6 +55,11 @@ void FRDDSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Vie
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_RDDSceneProxy_GetDynamicMeshElements);
 	check(IsInParallelRenderingThread());
+	
+	if (CVarRDDDrawPDI.GetValueOnAnyThread() == 0)
+	{
+		return;
+	}
 	
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
 	{
@@ -71,5 +101,44 @@ uint32 FRDDSceneProxy::GetMemoryFootprint() const
 uint32 FRDDSceneProxy::GetAllocatedSize() const
 {
 	return FPrimitiveSceneProxy::GetAllocatedSize() + Lines.GetAllocatedSize();
+}
+
+void FRDDSceneProxy::BuildVertexBuffers()
+{
+	// bNeedsCPUAccess = false; the CPU-side copy is freed once it's been uploaded
+	// so the data lives only on the GPU.
+	
+	VertexBuffers.PositionVertexBuffer.Init(NumVertices, /*bNeedsCPUAccess=*/false);
+	VertexBuffers.ColorVertexBuffer.Init(NumVertices, /*bNeedsCPUAccess=*/false);
+	VertexBuffers.StaticMeshVertexBuffer.Init(NumVertices, /*NumTexCoords=*/1, /*bNeedsCPUAccess=*/false);
+
+	for (int32 i = 0; i < Lines.Num(); ++i)
+	{
+		const FRDDLine& Line = Lines[i];
+		const uint32 V0 = i * 2;
+		const uint32 V1 = V0 + 1;
+
+		// World-space positions, narrowed from double to float for the GPU.
+		VertexBuffers.PositionVertexBuffer.VertexPosition(V0) = FVector3f(Line.Start);
+		VertexBuffers.PositionVertexBuffer.VertexPosition(V1) = FVector3f(Line.End);
+
+		VertexBuffers.ColorVertexBuffer.VertexColor(V0) = Line.Color;
+		VertexBuffers.ColorVertexBuffer.VertexColor(V1) = Line.Color;
+
+		// The standard vertex factory expects a tangent basis and a UV.
+		// Lines use neither, so these are fixed placeholders.
+		for (const uint32 V : { V0, V1 })
+		{
+			VertexBuffers.StaticMeshVertexBuffer.SetVertexTangents(
+				V, FVector3f::XAxisVector, FVector3f::YAxisVector, FVector3f::ZAxisVector);
+			VertexBuffers.StaticMeshVertexBuffer.SetVertexUV(V, 0, FVector2f::ZeroVector);
+		}
+	}
+	
+	// Queues the upload to the render thread. The constructor isn't on the
+	// render thread, so GPU resources can't be created here directly.
+	BeginInitResource(&VertexBuffers.PositionVertexBuffer);
+	BeginInitResource(&VertexBuffers.ColorVertexBuffer);
+	BeginInitResource(&VertexBuffers.StaticMeshVertexBuffer);
 }
 

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "PrimitiveSceneProxy.h"
 #include "RDDTypes.h"
+#include "StaticMeshResources.h"
 
 class URDDComponent;
 
@@ -16,6 +17,8 @@ class FRDDSceneProxy : public FPrimitiveSceneProxy
 public:
 	explicit FRDDSceneProxy(const URDDComponent* InComponent);
 	
+	virtual ~FRDDSceneProxy() override;
+	
 	virtual SIZE_T GetTypeHash() const override;
 	
 	virtual void GetDynamicMeshElements(const TArray<const FSceneView*>& Views, 
@@ -27,6 +30,12 @@ public:
 	
 private:
 	uint32 GetAllocatedSize() const;
+	
+	void BuildVertexBuffers();
+
+	/** SoA vertex data on the GPU: positions, colours, and placeholder tangents/UVs. */
+	FStaticMeshVertexBuffers VertexBuffers;
+	uint32 NumVertices = 0;
 	
 	TArray<FRDDLine> Lines;
 };
