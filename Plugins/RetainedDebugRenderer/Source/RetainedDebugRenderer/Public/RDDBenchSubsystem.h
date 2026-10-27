@@ -9,6 +9,13 @@
 /**
  * 
  */
+
+enum class ERDDBenchMode : uint8
+{
+	Stock,     // DrawDebugLine every frame
+	Retained,  // submitted once to my renderer
+};
+
 UCLASS()
 class RETAINEDDEBUGRENDERER_API URDDBenchSubsystem : public UTickableWorldSubsystem
 {
@@ -25,6 +32,8 @@ public:
 	
 	void StartCapture(int32 NumFrames);
 	void SnapToBenchCamera();
+	
+	void SetMode(ERDDBenchMode NewMode);
 private:
 	void EmitStockLines();
 	void EmitStockBoxes();
@@ -46,4 +55,8 @@ private:
 	TArray<float> GPUSamples;
 	
 	static constexpr int32 RDDSeed = 12345; 
+	
+	void RefreshRetainedLines();
+
+	ERDDBenchMode Mode = ERDDBenchMode::Stock;
 };

@@ -9,6 +9,8 @@
 #include "Camera/CameraActor.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "RDDSubsystem.h"
+#include "RDDTypes.h"
 
 namespace
 {
@@ -31,6 +33,25 @@ namespace
 		}
 		OutStdDev = FMath::Sqrt(SumSq / (Samples.Num() - 1));
 	}
+	
+	/** One seeded bench line. Both modes call this, so both draw identical lines. */
+	FRDDLine MakeBenchLine(FRandomStream& Rand)
+	{
+		// Separate statements on purpose: C++ doesn't define which operand of *
+		// is evaluated first, so a one-line version could consume the random
+		// stream in a different order on another compiler.
+		const FVector Dir  = Rand.GetUnitVector();
+		const float   Dist = Rand.FRandRange(200.f, 3000.f);
+		const FVector A    = Dir * Dist;
+		const FVector B    = A + Rand.GetUnitVector() * 150.f;
+
+		return FRDDLine(A, B, FColor(160, 0, 0));
+	}
+
+	const TCHAR* ModeName(ERDDBenchMode Mode)
+	{
+		return Mode == ERDDBenchMode::Retained ? TEXT("RETAINED") : TEXT("STOCK");
+	}
 }
 
 void URDDBenchSubsystem::Tick(float DeltaTime)
@@ -38,7 +59,8 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	check(IsInGameThread());
 	
-	if (StockLineCount > 0)   { EmitStockLines(); }
+	//if (StockLineCount > 0)   { EmitStockLines(); }
+	if (Mode == ERDDBenchMode::Stock && StockLineCount > 0) { EmitStockLines(); }
 	if (StockBoxCount > 0)    { EmitStockBoxes(); }
 	if (StockSphereCount > 0) { EmitStockSpheres(); }
 	
@@ -46,8 +68,8 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			1, 0.f, FColor::Yellow, 
-			FString::Printf(TEXT("Retained Draw | STOCK | L:%d B:%d S:%d"),
-				StockLineCount, StockBoxCount, StockSphereCount));
+			FString::Printf(TEXT("Retained Draw | %s | L:%d B:%d S:%d"),
+			ModeName(Mode), StockLineCount, StockBoxCount, StockSphereCount));
 	}
 	
 	if (bCapturing)
@@ -73,6 +95,7 @@ void URDDBenchSubsystem::SetStockLineCount(int32 Count)
 {
 	check(IsInGameThread()); 
 	StockLineCount = FMath::Max(0, Count);
+	RefreshRetainedLines();
 }
 
 void URDDBenchSubsystem::SetStockBoxCount(int32 Count)
@@ -98,6 +121,8 @@ void URDDBenchSubsystem::ClearAll()
 	{
 		FlushPersistentDebugLines(World);
 	}
+	
+	RefreshRetainedLines();
 }
 
 void URDDBenchSubsystem::EmitStockBoxes()
@@ -241,8 +266,9 @@ void URDDBenchSubsystem::FinishCapture()
 	}
 
 	const FString Row = FString::Printf(
-			TEXT("%s,STOCK,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
-		*FDateTime::Now().ToString(),
+			TEXT("%s,%s,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
+			*FDateTime::Now().ToString(),
+			ModeName(Mode),
 		StockLineCount,
 		StockBoxCount,
 		StockSphereCount,
@@ -270,16 +296,23 @@ void URDDBenchSubsystem::EmitStockLines()
 	
 	FRandomStream Rand(RDDSeed);
 
-	for (int i = 0; i < StockLineCount; ++i)
+	/*for (int i = 0; i < StockLineCount; ++i)
 	{
 		const FVector A = Rand.GetUnitVector() * Rand.FRandRange(200.f, 3000.f);
 		const FVector B = A + Rand.GetUnitVector() * 150.f;
 		
 		DrawDebugLine(World, A, B, FColor(160,0,0),
-					 /*bPersistentLines=*/false,
-					 /*LifeTime=*/-1.f,
-					 /*DepthPriority=*/0,
-					 /*Thickness=*/0.f);
+					 /*bPersistentLines=#1#false,
+					 /*LifeTime=#1#-1.f,
+					 /*DepthPriority=#1#0,
+					 /*Thickness=#1#0.f);
+	}*/
+	for (int32 i = 0; i < StockLineCount; ++i)
+	{
+		const FRDDLine Line = MakeBenchLine(Rand);
+		DrawDebugLine(World, Line.Start, Line.End, Line.Color,
+					  /*bPersistentLines=*/false, /*LifeTime=*/-1.f,
+					  /*DepthPriority=*/0, /*Thickness=*/0.f);
 	}
 }
 
@@ -300,6 +333,42 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressLines(
 		}
 		)
 );
+
+void URDDBenchSubsystem::SetMode(ERDDBenchMode NewMode)
+{
+	check(IsInGameThread());
+	Mode = NewMode;
+	RefreshRetainedLines();
+}
+
+void URDDBenchSubsystem::RefreshRetainedLines()
+{
+	check(IsInGameThread());
+
+	UWorld* World = GetWorld();
+	URDDSubsystem* RDD = World ? World->GetSubsystem<URDDSubsystem>() : nullptr;
+	if (!RDD) { return; }
+
+	// Always clear first: AddLines appends, so re-submitting without
+	// clearing would draw everything twice.
+	RDD->ClearLines();
+
+	if (Mode != ERDDBenchMode::Retained || StockLineCount == 0)
+	{
+		return;
+	}
+
+	TArray<FRDDLine> Lines;
+	Lines.Reserve(StockLineCount);
+
+	FRandomStream Rand(RDDSeed);
+	for (int32 i = 0; i < StockLineCount; ++i)
+	{
+		Lines.Add(MakeBenchLine(Rand));
+	}
+
+	RDD->AddLines(Lines);
+}
 
 static FAutoConsoleCommandWithWorldAndArgs GRDDStressBoxes(
 	TEXT("RDD.Stress.Boxes"),
@@ -369,5 +438,21 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDBenchSetCamera(
 			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
 			{
 				Sub->SnapToBenchCamera();
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressMode(
+	TEXT("RDD.Stress.Mode"),
+	TEXT("0 = stock DrawDebugLine every frame, 1 = retained renderer. Lines only."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const int32 M = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+				Sub->SetMode(M == 1 ? ERDDBenchMode::Retained : ERDDBenchMode::Stock);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Mode -> %s"),
+					   M == 1 ? TEXT("RETAINED") : TEXT("STOCK"));
 			}
 		}));
