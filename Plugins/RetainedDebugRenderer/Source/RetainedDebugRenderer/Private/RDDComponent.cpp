@@ -34,6 +34,7 @@ void URDDComponent::AddLines(TConstArrayView<FRDDLine> NewLines)
 void URDDComponent::ClearLines()
 {
 	check(IsInGameThread());
+	if (Lines.IsEmpty()) { return; }
 
 	Lines.Reset();
 	MarkRenderStateDirty();

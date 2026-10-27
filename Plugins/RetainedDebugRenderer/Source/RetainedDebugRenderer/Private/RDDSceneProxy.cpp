@@ -13,6 +13,7 @@ FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	, Lines{InComponent->GetLines()}	// this is a full copy, not reference
 {
 	bWillEverBeLit = false;
+	UE_LOG(LogTemp, Warning, TEXT("RDD proxy created with %d lines"), Lines.Num());
 }
 
 SIZE_T FRDDSceneProxy::GetTypeHash() const
