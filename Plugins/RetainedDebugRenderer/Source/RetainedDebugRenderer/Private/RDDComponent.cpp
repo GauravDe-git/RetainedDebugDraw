@@ -16,7 +16,7 @@ URDDComponent::URDDComponent()
 	SetGenerateOverlapEvents(false);
 	SetCastShadow(false);
 
-	// Same as ULineBatchComponent: we don't implement GetUsedMaterials().
+	// No textures to stream, so stay out of the texture streaming manager.
 	SetIgnoreStreamingManagerUpdate(true);
 }
 
@@ -61,4 +61,19 @@ FBoxSphereBounds URDDComponent::CalcBounds(const FTransform& LocalToWorld) const
 	return FBoxSphereBounds(FVector::ZeroVector, BoxExtent, BoxExtent.Size());
 }
 
+UMaterialInterface* URDDComponent::GetLineMaterial() const
+{
+	return GEngine ? GEngine->VertexColorMaterial : nullptr;
+}
+
+void URDDComponent::GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials,
+									 bool bGetDebugMaterials) const
+{
+	// The engine rebuilds our proxy when this material's shaders recompile,
+	// so it has to know we use it.
+	if (UMaterialInterface* Material = GetLineMaterial())
+	{
+		OutMaterials.Add(Material);
+	}
+}
 

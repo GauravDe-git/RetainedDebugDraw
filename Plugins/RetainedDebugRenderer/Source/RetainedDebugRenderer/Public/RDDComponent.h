@@ -30,6 +30,13 @@ public:
 	//~ UPrimitiveComponent
 	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
+	
+	/** The material lines are rendered with. Single source of truth for the proxy and GetUsedMaterials. */
+	UMaterialInterface* GetLineMaterial() const;
+
+	//~ UPrimitiveComponent
+	virtual void GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials,
+								  bool bGetDebugMaterials = false) const override;
 
 private:
 	TArray<FRDDLine> Lines;

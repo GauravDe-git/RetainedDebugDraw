@@ -4,6 +4,10 @@
 #include "PrimitiveSceneProxy.h"
 #include "RDDTypes.h"
 #include "StaticMeshResources.h"
+#include "DynamicMeshBuilder.h"        // FDynamicMeshIndexBuffer32
+#include "LocalVertexFactory.h"
+#include "MaterialShared.h"            // FMaterialRelevance
+#include "StaticMeshResources.h"
 
 class URDDComponent;
 
@@ -32,6 +36,13 @@ private:
 	uint32 GetAllocatedSize() const;
 	
 	void BuildVertexBuffers();
+	
+	void InitVertexFactory();
+
+	FLocalVertexFactory          VertexFactory;
+	FDynamicMeshIndexBuffer32    IndexBuffer;
+	FMaterialRenderProxy*        MaterialProxy = nullptr;
+	FMaterialRelevance           MaterialRelevance;
 
 	/** SoA vertex data on the GPU: positions, colours, and placeholder tangents/UVs. */
 	FStaticMeshVertexBuffers VertexBuffers;
