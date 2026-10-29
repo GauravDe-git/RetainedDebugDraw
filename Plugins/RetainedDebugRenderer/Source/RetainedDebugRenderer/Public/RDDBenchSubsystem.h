@@ -37,6 +37,9 @@ public:
 	void SetMode(ERDDBenchMode NewMode);
 	
 	void SetMoveOne(bool bEnable);
+	
+	void ReleaseFromMiddle(int32 Count);
+	void SubmitExtra(int32 Count);
 private:
 	void EmitStockLines();
 	void EmitStockBoxes();
@@ -66,4 +69,6 @@ private:
 	TArray<FRDDHandle> RetainedHandles;
 	bool  bMoveOne     = false;
 	float MoveOneTime  = 0.f;
+	
+	int32 ExtraSubmitBatch = 0;
 };

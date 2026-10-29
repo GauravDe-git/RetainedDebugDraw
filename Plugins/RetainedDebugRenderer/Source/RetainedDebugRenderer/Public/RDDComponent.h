@@ -45,6 +45,9 @@ public:
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
 	virtual void GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials,
 								  bool bGetDebugMaterials = false) const override;
+	
+	int32 GetNumSlots() const;
+	int32 GetNumFreeSlots() const;
 
 private:
 	struct FSlot
@@ -56,6 +59,15 @@ private:
 
 	/** Puts a line in a free slot, or a new one. Doesn't mark render state dirty. */
 	FRDDHandle AddSlot(const FRDDLine& Line);
+	
+	/** The line the renderer should draw for a slot: itself, or zero-length if released. */
+	static FRDDLine MakeRenderLine(const FSlot& Slot);
+
+	/** Gets one slot to the renderer: a 32-byte write if the proxy has it, a rebuild if not. */
+	void SyncSlotToRenderer(uint32 Index);
+
+	/** How many slots the current proxy was built with. Set in CreateSceneProxy. */
+	int32 ProxySlotCapacity = 0;
 
 	TArray<FSlot>  Slots;
 	TArray<uint32> FreeSlots;

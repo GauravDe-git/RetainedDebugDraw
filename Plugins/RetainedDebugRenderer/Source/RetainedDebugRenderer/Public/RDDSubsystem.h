@@ -27,6 +27,8 @@ public:
 	bool UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine);
 	void ClearLines();
 	int32 GetNumLines() const;
+	int32 GetNumSlots() const;
+	int32 GetNumFreeSlots() const;
 	
 	FRDDHandle SubmitLine(const FRDDLine& Line);
 	bool       ReleaseLine(FRDDHandle Handle);

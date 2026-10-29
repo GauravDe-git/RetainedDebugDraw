@@ -100,6 +100,18 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 			3, 0.f, FColor::Cyan,
 			FString::Printf(TEXT("RDD partial writes: %lld (%lld bytes total)"),
 				FRDDSceneProxy::GetPartialWrites(), FRDDSceneProxy::GetPartialBytesWritten()));
+		
+		if (URDDSubsystem* RDD = GetWorld() ? GetWorld()->GetSubsystem<URDDSubsystem>() : nullptr)
+		{
+			const int32 NumSlots = RDD->GetNumSlots();
+			const int32 NumFree  = RDD->GetNumFreeSlots();
+			const float FragPct  = NumSlots > 0 ? 100.f * NumFree / NumSlots : 0.f;
+
+			GEngine->AddOnScreenDebugMessage(
+				4, 0.f, FColor::Cyan,
+				FString::Printf(TEXT("RDD slots: %d total, %d live, %d free (%.1f%% free)"),
+					NumSlots, RDD->GetNumLines(), NumFree, FragPct));
+		}
 	}
 
 	if (bCapturing)
@@ -379,6 +391,40 @@ void URDDBenchSubsystem::SetMoveOne(bool bEnable)
 	MoveOneTime = 0.f;
 }
 
+void URDDBenchSubsystem::ReleaseFromMiddle(int32 Count)
+{
+	check(IsInGameThread());
+
+	URDDSubsystem* RDD = GetWorld() ? GetWorld()->GetSubsystem<URDDSubsystem>() : nullptr;
+	if (!RDD || Mode != ERDDBenchMode::Retained) { return; }
+
+	Count = FMath::Clamp(Count, 0, RetainedHandles.Num());
+	const int32 Start = (RetainedHandles.Num() - Count) / 2;
+
+	for (int32 i = Start; i < Start + Count; ++i)
+	{
+		RDD->ReleaseLine(RetainedHandles[i]);
+	}
+	RetainedHandles.RemoveAt(Start, Count);
+}
+
+void URDDBenchSubsystem::SubmitExtra(int32 Count)
+{
+	check(IsInGameThread());
+
+	URDDSubsystem* RDD = GetWorld() ? GetWorld()->GetSubsystem<URDDSubsystem>() : nullptr;
+	if (!RDD || Mode != ERDDBenchMode::Retained) { return; }
+
+	// A different seed per batch so these are new lines, in yellow so they stand out.
+	FRandomStream Rand(RDDSeed + 1 + ExtraSubmitBatch++);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		FRDDLine Line = MakeBenchLine(Rand);
+		Line.Color = FColor::Yellow;
+		RetainedHandles.Add(RDD->SubmitLine(Line));
+	}
+}
+
 void URDDBenchSubsystem::RefreshRetainedLines()
 {
 	check(IsInGameThread());
@@ -511,5 +557,35 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressMoveOne(
 				const bool bEnable = Args.Num() > 0 && FCString::Atoi(*Args[0]) != 0;
 				Sub->SetMoveOne(bEnable);
 				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.MoveOne -> %d"), bEnable ? 1 : 0);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressRelease(
+	TEXT("RDD.Stress.Release"),
+	TEXT("Release N retained lines from the middle of the list. Usage: RDD.Stress.Release <N>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+				Sub->ReleaseFromMiddle(N);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Release -> %d"), N);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressSubmit(
+	TEXT("RDD.Stress.Submit"),
+	TEXT("Submit N new yellow lines through handles. Usage: RDD.Stress.Submit <N>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+				Sub->SubmitExtra(N);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Submit -> %d"), N);
 			}
 		}));

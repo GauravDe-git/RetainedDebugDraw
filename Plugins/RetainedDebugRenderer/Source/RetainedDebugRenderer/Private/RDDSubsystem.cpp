@@ -66,6 +66,18 @@ int32 URDDSubsystem::GetNumLines() const
 	return Component ? Component->GetNumLines() : 0;
 }
 
+int32 URDDSubsystem::GetNumSlots() const
+{
+	check(IsInGameThread());
+	return Component ? Component->GetNumSlots() : 0;
+}
+
+int32 URDDSubsystem::GetNumFreeSlots() const
+{
+	check(IsInGameThread());
+	return Component ? Component->GetNumFreeSlots() : 0;
+}
+
 FRDDHandle URDDSubsystem::SubmitLine(const FRDDLine& Line)
 {
 	check(IsInGameThread());

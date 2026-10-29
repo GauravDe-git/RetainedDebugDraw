@@ -1,15 +1,12 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-#include "RDDComponent.h"
+﻿#include "RDDComponent.h"
 
 #include "RDDSceneProxy.h"
 #include "Engine/CollisionProfile.h"
+#include "Engine/Engine.h"
+#include "Materials/Material.h"
 
-// Sets default values for this component's properties
 URDDComponent::URDDComponent()
 {
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = false;
 
 	SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
@@ -20,91 +17,9 @@ URDDComponent::URDDComponent()
 	SetIgnoreStreamingManagerUpdate(true);
 }
 
-FRDDHandle URDDComponent::SubmitLine(const FRDDLine& Line)
-{
-	check(IsInGameThread());
-
-	const FRDDHandle Handle = AddSlot(Line);
-	MarkRenderStateDirty();
-	return Handle;
-}
-
-bool URDDComponent::UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine)
-{
-	check(IsInGameThread());
-	if (!IsValidHandle(Handle)) { return false; }
-
-	// The slot stays the source of truth, so any later rebuild picks this up.
-	Slots[Handle.Index].Line = NewLine;
-
-	// Deliberately not MarkRenderStateDirty: that would rebuild everything.
-	// Send only this slot to the proxy that's already alive.
-	//
-	// Capturing the proxy pointer is safe: its deletion is queued on the
-	// render thread after this command, and render commands run in order.
-	if (FRDDSceneProxy* Proxy = static_cast<FRDDSceneProxy*>(SceneProxy))
-	{
-		const uint32 SlotIndex = Handle.Index;
-		ENQUEUE_RENDER_COMMAND(RDDUpdateLine)(
-			[Proxy, SlotIndex, NewLine](FRHICommandListImmediate& RHICmdList)
-			{
-				Proxy->UpdateSlot_RenderThread(RHICmdList, SlotIndex, NewLine);
-			});
-	}
-	return true;
-}
-
-bool URDDComponent::ReleaseLine(FRDDHandle Handle)
-{
-	check(IsInGameThread());
-	if (!IsValidHandle(Handle)) { return false; }
-
-	FSlot& Slot = Slots[Handle.Index];
-	Slot.bAlive = false;
-	++Slot.Generation;              // every handle to the old occupant is now stale
-	FreeSlots.Push(Handle.Index);
-	--NumAlive;
-
-	MarkRenderStateDirty();
-	return true;
-}
-
-bool URDDComponent::IsValidHandle(FRDDHandle Handle) const
-{
-	check(IsInGameThread());
-
-	return Handle.IsSet()
-		&& Slots.IsValidIndex(static_cast<int32>(Handle.Index))
-		&& Slots[Handle.Index].bAlive
-		&& Slots[Handle.Index].Generation == Handle.Generation;
-}
-
-bool URDDComponent::GetLine(FRDDHandle Handle, FRDDLine& OutLine) const
-{
-	if (!IsValidHandle(Handle)) { return false; }
-
-	OutLine = Slots[Handle.Index].Line;
-	return true;
-}
-
-void URDDComponent::GetRenderLines(TArray<FRDDLine>& OutLines) const
-{
-	OutLines.Reset();
-
-	// Nothing alive: draw nothing, rather than a buffer full of invisible
-	// lines that would still cost GPU time in stock-mode measurements.
-	if (NumAlive == 0) { return; }
-
-	OutLines.SetNum(Slots.Num());
-	for (int32 i = 0; i < Slots.Num(); ++i)
-	{
-		const FSlot& Slot = Slots[i];
-		OutLines[i] = Slot.bAlive
-			? Slot.Line
-			// Released slot: a zero-length line, which should rasterise nothing.
-			: FRDDLine(Slot.Line.Start, Slot.Line.Start, FColor::Transparent);
-	}
-}
+// ---------------------------------------------------------------------------
+// Slot bookkeeping
+// ---------------------------------------------------------------------------
 
 FRDDHandle URDDComponent::AddSlot(const FRDDLine& Line)
 {
@@ -129,6 +44,107 @@ FRDDHandle URDDComponent::AddSlot(const FRDDLine& Line)
 	return Handle;
 }
 
+FRDDLine URDDComponent::MakeRenderLine(const FSlot& Slot)
+{
+	return Slot.bAlive
+		? Slot.Line
+		// Released slot: a zero-length line, which should rasterise nothing.
+		: FRDDLine(Slot.Line.Start, Slot.Line.Start, FColor::Transparent);
+}
+
+void URDDComponent::SyncSlotToRenderer(uint32 Index)
+{
+	// The current proxy doesn't have this slot — it's new, or the proxy was
+	// built empty. Only a rebuild can add it.
+	if (static_cast<int32>(Index) >= ProxySlotCapacity)
+	{
+		MarkRenderStateDirty();
+		return;
+	}
+
+	// Otherwise send just this slot. Capturing the proxy pointer is safe:
+	// its deletion is queued after this command, and render commands run in order.
+	if (FRDDSceneProxy* Proxy = static_cast<FRDDSceneProxy*>(SceneProxy))
+	{
+		const FRDDLine RenderLine = MakeRenderLine(Slots[Index]);
+		ENQUEUE_RENDER_COMMAND(RDDSyncSlot)(
+			[Proxy, Index, RenderLine](FRHICommandListImmediate& RHICmdList)
+			{
+				Proxy->UpdateSlot_RenderThread(RHICmdList, Index, RenderLine);
+			});
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Single-line API: each change is a 32-byte write where possible
+// ---------------------------------------------------------------------------
+
+FRDDHandle URDDComponent::SubmitLine(const FRDDLine& Line)
+{
+	check(IsInGameThread());
+
+	// Reusing a slot the proxy already has: a write. A brand-new slot: a rebuild to grow.
+	const FRDDHandle Handle = AddSlot(Line);
+	SyncSlotToRenderer(Handle.Index);
+	return Handle;
+}
+
+bool URDDComponent::IsValidHandle(FRDDHandle Handle) const
+{
+	check(IsInGameThread());
+
+	return Handle.IsSet()
+		&& Slots.IsValidIndex(static_cast<int32>(Handle.Index))
+		&& Slots[Handle.Index].bAlive
+		&& Slots[Handle.Index].Generation == Handle.Generation;
+}
+
+bool URDDComponent::GetLine(FRDDHandle Handle, FRDDLine& OutLine) const
+{
+	if (!IsValidHandle(Handle)) { return false; }
+
+	OutLine = Slots[Handle.Index].Line;
+	return true;
+}
+
+bool URDDComponent::ReleaseLine(FRDDHandle Handle)
+{
+	check(IsInGameThread());
+	if (!IsValidHandle(Handle)) { return false; }
+
+	FSlot& Slot = Slots[Handle.Index];
+	Slot.bAlive = false;
+	++Slot.Generation;              // every handle to the old occupant is now stale
+	FreeSlots.Push(Handle.Index);
+	--NumAlive;
+
+	if (NumAlive == 0)
+	{
+		// Last line gone: rebuild empty, rather than keep drawing invisible lines.
+		MarkRenderStateDirty();
+	}
+	else
+	{
+		SyncSlotToRenderer(Handle.Index);
+	}
+	return true;
+}
+
+bool URDDComponent::UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine)
+{
+	check(IsInGameThread());
+	if (!IsValidHandle(Handle)) { return false; }
+
+	// The slot stays the source of truth, so any later rebuild picks this up.
+	Slots[Handle.Index].Line = NewLine;
+	SyncSlotToRenderer(Handle.Index);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk API: always a rebuild
+// ---------------------------------------------------------------------------
+
 void URDDComponent::AddLines(TConstArrayView<FRDDLine> NewLines, TArray<FRDDHandle>* OutHandles)
 {
 	check(IsInGameThread());
@@ -145,6 +161,7 @@ void URDDComponent::AddLines(TConstArrayView<FRDDLine> NewLines, TArray<FRDDHand
 		if (OutHandles) { OutHandles->Add(Handle); }
 	}
 
+	// One rebuild, not one write per line: thousands of separate GPU writes would cost far more.
 	MarkRenderStateDirty();
 }
 
@@ -168,8 +185,13 @@ void URDDComponent::ClearLines()
 	}
 	NumAlive = 0;
 
+	// One rebuild to an empty proxy, not one write per released line.
 	MarkRenderStateDirty();
 }
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 int32 URDDComponent::GetNumLines() const
 {
@@ -177,8 +199,57 @@ int32 URDDComponent::GetNumLines() const
 	return NumAlive;
 }
 
+int32 URDDComponent::GetNumSlots() const
+{
+	check(IsInGameThread());
+	return Slots.Num();
+}
+
+int32 URDDComponent::GetNumFreeSlots() const
+{
+	check(IsInGameThread());
+	return FreeSlots.Num();
+}
+
+void URDDComponent::GetRenderLines(TArray<FRDDLine>& OutLines) const
+{
+	OutLines.Reset();
+
+	// Nothing alive: draw nothing, rather than a buffer full of invisible
+	// lines that would still cost GPU time in stock-mode measurements.
+	if (NumAlive == 0) { return; }
+
+	OutLines.SetNum(Slots.Num());
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		OutLines[i] = MakeRenderLine(Slots[i]);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+UMaterialInterface* URDDComponent::GetLineMaterial() const
+{
+	return GEngine ? GEngine->VertexColorMaterial : nullptr;
+}
+
+void URDDComponent::GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials,
+                                     bool bGetDebugMaterials) const
+{
+	// The engine rebuilds our proxy when this material's shaders recompile,
+	// so it has to know we use it.
+	if (UMaterialInterface* Material = GetLineMaterial())
+	{
+		OutMaterials.Add(Material);
+	}
+}
+
 FPrimitiveSceneProxy* URDDComponent::CreateSceneProxy()
 {
+	// Must match GetRenderLines: an empty component builds an empty proxy.
+	ProxySlotCapacity = (NumAlive > 0) ? Slots.Num() : 0;
 	return new FRDDSceneProxy(this);
 }
 
@@ -191,20 +262,3 @@ FBoxSphereBounds URDDComponent::CalcBounds(const FTransform& LocalToWorld) const
 	const FVector BoxExtent(HALF_WORLD_MAX);
 	return FBoxSphereBounds(FVector::ZeroVector, BoxExtent, BoxExtent.Size());
 }
-
-UMaterialInterface* URDDComponent::GetLineMaterial() const
-{
-	return GEngine ? GEngine->VertexColorMaterial : nullptr;
-}
-
-void URDDComponent::GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials,
-									 bool bGetDebugMaterials) const
-{
-	// The engine rebuilds our proxy when this material's shaders recompile,
-	// so it has to know we use it.
-	if (UMaterialInterface* Material = GetLineMaterial())
-	{
-		OutMaterials.Add(Material);
-	}
-}
-
