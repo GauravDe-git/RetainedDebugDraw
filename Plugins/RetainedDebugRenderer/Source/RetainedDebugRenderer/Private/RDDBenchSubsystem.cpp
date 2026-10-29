@@ -52,26 +52,32 @@ namespace
 	{
 		return Mode == ERDDBenchMode::Retained ? TEXT("RETAINED") : TEXT("STOCK");
 	}
+	
+	/** Reads the proxy's RDD.DrawPath cvar, so captures record which path was active. */
+	int32 GetDrawPath()
+	{
+		static IConsoleVariable* CVar =
+			IConsoleManager::Get().FindConsoleVariable(TEXT("RDD.DrawPath"));
+		return CVar ? CVar->GetInt() : -1;
+	}
 }
-
 void URDDBenchSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	check(IsInGameThread());
-	
-	//if (StockLineCount > 0)   { EmitStockLines(); }
+
 	if (Mode == ERDDBenchMode::Stock && StockLineCount > 0) { EmitStockLines(); }
 	if (StockBoxCount > 0)    { EmitStockBoxes(); }
 	if (StockSphereCount > 0) { EmitStockSpheres(); }
-	
+
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
-			1, 0.f, FColor::Yellow, 
-			FString::Printf(TEXT("Retained Draw | %s | L:%d B:%d S:%d"),
-			ModeName(Mode), StockLineCount, StockBoxCount, StockSphereCount));
+			1, 0.f, FColor::Yellow,
+			FString::Printf(TEXT("Retained Draw | %s | Path:%d | L:%d B:%d S:%d"),
+				ModeName(Mode), GetDrawPath(), StockLineCount, StockBoxCount, StockSphereCount));
 	}
-	
+
 	if (bCapturing)
 	{
 		SampleFrame(DeltaTime);
@@ -259,16 +265,17 @@ void URDDBenchSubsystem::FinishCapture()
 	if (!IFileManager::Get().FileExists(*Path))
 	{
 		FFileHelper::SaveStringToFile(
-			TEXT("Timestamp,Mode,Lines,Boxes,Spheres,Frames,")
+			TEXT("Timestamp,Mode,DrawPath,Lines,Boxes,Spheres,Frames,")
 			TEXT("FrameMean,FrameSD,GameMean,GameSD,")
 			TEXT("RenderMean,RenderSD,GPUMean,GPUSD\n"),
 			*Path);
 	}
 
 	const FString Row = FString::Printf(
-			TEXT("%s,%s,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
-			*FDateTime::Now().ToString(),
-			ModeName(Mode),
+		TEXT("%s,%s,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"),
+		*FDateTime::Now().ToString(),
+		ModeName(Mode),
+		GetDrawPath(),
 		StockLineCount,
 		StockBoxCount,
 		StockSphereCount,
