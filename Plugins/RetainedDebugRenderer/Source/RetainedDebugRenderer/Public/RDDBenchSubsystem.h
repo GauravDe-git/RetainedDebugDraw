@@ -40,6 +40,8 @@ public:
 	
 	void ReleaseFromMiddle(int32 Count);
 	void SubmitExtra(int32 Count);
+	
+	void SetDemoSpheres(bool bEnable);
 private:
 	void EmitStockLines();
 	void EmitStockBoxes();
@@ -71,4 +73,10 @@ private:
 	float MoveOneTime  = 0.f;
 	
 	int32 ExtraSubmitBatch = 0;
+	
+	void GatherDemoTargets();
+	void EmitStockDemoSpheres();
+
+	/** Centre and radius of every mesh that gets a demo sphere. */
+	TArray<FSphere> DemoTargets;
 };

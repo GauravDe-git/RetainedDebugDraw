@@ -13,6 +13,9 @@
 #include "RDDTypes.h"
 #include "RDDSceneProxy.h"
 #include "RDDShapes.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 
 namespace
 {
@@ -52,6 +55,7 @@ namespace
 	
 	constexpr int32 SphereSegments = 12;
 	const FColor    ShapeColor(170, 0, 0);
+	const FColor DemoColor(0, 200, 0);
 
 	struct FBenchShape
 	{
@@ -91,6 +95,7 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 		if (StockLineCount > 0)   { EmitStockLines(); }
 		if (StockBoxCount > 0)    { EmitStockBoxes(); }
 		if (StockSphereCount > 0) { EmitStockSpheres(); }
+		if (DemoTargets.Num() > 0) { EmitStockDemoSpheres(); }
 	}
 
 	// Spin line 0 through its handle: one line changes, the rest stay put.
@@ -457,8 +462,9 @@ void URDDBenchSubsystem::RefreshRetainedLines()
 	if (Mode != ERDDBenchMode::Retained) { return; }
 
 	const int32 TotalLines = StockLineCount
-						   + StockBoxCount    * 12
-						   + StockSphereCount * 2 * SphereSegments * SphereSegments;
+					   + StockBoxCount    * 12
+					   + StockSphereCount * 2 * SphereSegments * SphereSegments
+					   + DemoTargets.Num() * 2 * SphereSegments * SphereSegments;
 	if (TotalLines == 0) { return; }
 
 	TArray<FRDDLine> Lines;
@@ -489,9 +495,82 @@ void URDDBenchSubsystem::RefreshRetainedLines()
 			RDDShapes::AppendSphere(Lines, Shape.Center, Shape.Size, SphereSegments, ShapeColor);
 		}
 	}
+	
+	for (const FSphere& Target : DemoTargets)
+	{
+		RDDShapes::AppendSphere(Lines, Target.Center, static_cast<float>(Target.W),
+								SphereSegments, DemoColor);
+	}
 
 	// Keep a handle for every line, so individual lines can be moved later.
 	RDD->AddLines(Lines, &RetainedHandles);
+}
+
+void URDDBenchSubsystem::GatherDemoTargets()
+{
+	DemoTargets.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	// Anything bigger than this is scenery — floor, sky — not something to mark.
+	constexpr double MaxRadius = 500.0;
+
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		TInlineComponentArray<UStaticMeshComponent*> Components(*It);
+		for (UStaticMeshComponent* Comp : Components)
+		{
+			if (!Comp || !Comp->GetStaticMesh()) { continue; }
+
+			if (const UInstancedStaticMeshComponent* ISM = Cast<UInstancedStaticMeshComponent>(Comp))
+			{
+				// Foliage and other instanced meshes: one sphere per instance.
+				const FBoxSphereBounds LocalBounds = ISM->GetStaticMesh()->GetBounds();
+				for (int32 i = 0; i < ISM->GetInstanceCount(); ++i)
+				{
+					FTransform Instance;
+					if (!ISM->GetInstanceTransform(i, Instance, /*bWorldSpace=*/true)) { continue; }
+
+					const double Radius = LocalBounds.SphereRadius * Instance.GetMaximumAxisScale();
+					if (Radius <= MaxRadius)
+					{
+						DemoTargets.Emplace(Instance.TransformPosition(LocalBounds.Origin), Radius);
+					}
+				}
+			}
+			else if (Comp->Bounds.SphereRadius <= MaxRadius)
+			{
+				// A normal placed mesh: its world bounds are already computed.
+				DemoTargets.Emplace(Comp->Bounds.Origin, Comp->Bounds.SphereRadius);
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("RDD demo: %d targets"), DemoTargets.Num());
+}
+
+void URDDBenchSubsystem::EmitStockDemoSpheres()
+{
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	for (const FSphere& Target : DemoTargets)
+	{
+		DrawDebugSphere(World, Target.Center, static_cast<float>(Target.W), SphereSegments, DemoColor,
+						/*bPersistentLines=*/false, /*LifeTime=*/-1.f,
+						/*DepthPriority=*/0, /*Thickness=*/0.f);
+	}
+}
+
+void URDDBenchSubsystem::SetDemoSpheres(bool bEnable)
+{
+	check(IsInGameThread());
+
+	if (bEnable) { GatherDemoTargets(); }
+	else         { DemoTargets.Reset(); }
+
+	RefreshRetainedLines();
 }
 
 static FAutoConsoleCommandWithWorldAndArgs GRDDStressBoxes(
@@ -623,5 +702,19 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressSubmit(
 				const int32 N = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
 				Sub->SubmitExtra(N);
 				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Submit -> %d"), N);
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDDemoSpheres(
+	TEXT("RDD.Demo.Spheres"),
+	TEXT("1 = a debug sphere on every small mesh and instance in the level, 0 = remove."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const bool bEnable = Args.Num() > 0 && FCString::Atoi(*Args[0]) != 0;
+				Sub->SetDemoSpheres(bEnable);
 			}
 		}));
