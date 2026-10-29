@@ -22,3 +22,19 @@ struct FRDDLine
 		
 	}
 };
+
+/**
+ * Names one submitted line. Index finds its slot; Generation detects
+ * that the slot has been reused since this handle was issued.
+ * Only the component can say whether a handle is still valid.
+ */
+struct FRDDHandle
+{
+	static constexpr uint32 InvalidIndex = MAX_uint32;
+
+	uint32 Index      = InvalidIndex;
+	uint32 Generation = 0;
+
+	/** True if this handle was ever issued. Says nothing about whether it's still live. */
+	bool IsSet() const { return Index != InvalidIndex; }
+};

@@ -21,9 +21,9 @@ std::atomic<int64> FRDDSceneProxy::UploadedVertices{0};
 
 FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	: FPrimitiveSceneProxy{InComponent}
-, Lines{InComponent->GetLines()} // full copy, not ref
 , VertexFactory{GetScene().GetFeatureLevel(), "FRDDSceneProxy"}
 {
+	InComponent->GetRenderLines(Lines);
 	bWillEverBeLit = false;
 	
 	UMaterialInterface* Material = InComponent->GetLineMaterial();
@@ -126,8 +126,14 @@ void FRDDSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView*>& Vie
 #else
 			FPrimitiveDrawInterface* PDI = Collector.GetPDI(ViewIndex);
 #endif
+			/*for (const FRDDLine& Line : Lines)
+			{
+				PDI->DrawTranslucentLine(Line.Start, Line.End, FLinearColor(Line.Color),
+										 SDPG_World, 0.f);
+			}*/
 			for (const FRDDLine& Line : Lines)
 			{
+				if (Line.Start == Line.End) { continue; }   // released slot
 				PDI->DrawTranslucentLine(Line.Start, Line.End, FLinearColor(Line.Color),
 										 SDPG_World, 0.f);
 			}

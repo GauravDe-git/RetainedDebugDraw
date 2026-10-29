@@ -60,3 +60,21 @@ int32 URDDSubsystem::GetNumLines() const
 	check(IsInGameThread());
 	return Component ? Component->GetNumLines() : 0;
 }
+
+FRDDHandle URDDSubsystem::SubmitLine(const FRDDLine& Line)
+{
+	check(IsInGameThread());
+	return Component ? Component->SubmitLine(Line) : FRDDHandle();
+}
+
+bool URDDSubsystem::ReleaseLine(FRDDHandle Handle)
+{
+	check(IsInGameThread());
+	return Component && Component->ReleaseLine(Handle);
+}
+
+bool URDDSubsystem::IsValidHandle(FRDDHandle Handle) const
+{
+	check(IsInGameThread());
+	return Component && Component->IsValidHandle(Handle);
+}

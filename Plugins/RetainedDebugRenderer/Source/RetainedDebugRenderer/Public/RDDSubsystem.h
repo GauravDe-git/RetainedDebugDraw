@@ -27,6 +27,10 @@ public:
 	void ClearLines();
 	int32 GetNumLines() const;
 	
+	FRDDHandle SubmitLine(const FRDDLine& Line);
+	bool       ReleaseLine(FRDDHandle Handle);
+	bool       IsValidHandle(FRDDHandle Handle) const;
+	
 private:
 	/** making it UPROP so garbage collection knows we holding it **/
 	UPROPERTY(Transient)
