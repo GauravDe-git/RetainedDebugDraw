@@ -79,4 +79,6 @@ private:
 
 	/** Centre and radius of every mesh that gets a demo sphere. */
 	TArray<FSphere> DemoTargets;
+	
+	bool bCaptureSpoiled = false;
 };

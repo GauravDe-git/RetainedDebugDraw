@@ -163,6 +163,7 @@ TStatId URDDBenchSubsystem::GetStatId() const
 void URDDBenchSubsystem::SetStockLineCount(int32 Count)
 {
 	check(IsInGameThread()); 
+	if (bCapturing) { bCaptureSpoiled = true; }
 	StockLineCount = FMath::Max(0, Count);
 	RefreshRetainedLines();
 }
@@ -170,6 +171,7 @@ void URDDBenchSubsystem::SetStockLineCount(int32 Count)
 void URDDBenchSubsystem::SetStockBoxCount(int32 Count)
 {
 	check(IsInGameThread());
+	if (bCapturing) { bCaptureSpoiled = true; }
 	StockBoxCount = FMath::Max(0, Count);
 	RefreshRetainedLines();
 }
@@ -177,6 +179,7 @@ void URDDBenchSubsystem::SetStockBoxCount(int32 Count)
 void URDDBenchSubsystem::SetStockSphereCount(int32 Count)
 {
 	check(IsInGameThread());
+	if (bCapturing) { bCaptureSpoiled = true; }
 	StockSphereCount = FMath::Max(0, Count);
 	RefreshRetainedLines();
 }
@@ -246,6 +249,7 @@ void URDDBenchSubsystem::StartCapture(int32 NumFrames)
 	
 	FramesRemaining = FMath::Max(1, NumFrames);
 	bCapturing = true; 
+	bCaptureSpoiled = false;
 	
 	UE_LOG(LogTemp, Warning, TEXT("RDD capture started: %d frames"), FramesRemaining);
 }
@@ -306,6 +310,13 @@ void URDDBenchSubsystem::SampleFrame(float DeltaTime)
 void URDDBenchSubsystem::FinishCapture()
 {
 	bCapturing = false;
+	
+	if (bCaptureSpoiled)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("RDD capture discarded: settings changed while it was running. No row written."));
+		return;
+	}
 
 	float FrameMean, FrameSD, GameMean, GameSD, RenderMean, RenderSD, GPUMean, GPUSD;
 	MeanAndStdDev(FrameSamples,  FrameMean,  FrameSD);
@@ -399,6 +410,7 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressLines(
 void URDDBenchSubsystem::SetMode(ERDDBenchMode NewMode)
 {
 	check(IsInGameThread());
+	if (bCapturing) { bCaptureSpoiled = true; }
 	Mode = NewMode;
 	RefreshRetainedLines();
 }
@@ -406,6 +418,7 @@ void URDDBenchSubsystem::SetMode(ERDDBenchMode NewMode)
 void URDDBenchSubsystem::SetMoveOne(bool bEnable)
 {
 	check(IsInGameThread());
+	if (bCapturing) { bCaptureSpoiled = true; }
 	bMoveOne    = bEnable;
 	MoveOneTime = 0.f;
 }
@@ -566,6 +579,8 @@ void URDDBenchSubsystem::EmitStockDemoSpheres()
 void URDDBenchSubsystem::SetDemoSpheres(bool bEnable)
 {
 	check(IsInGameThread());
+	
+	if (bCapturing) { bCaptureSpoiled = true; }
 
 	if (bEnable) { GatherDemoTargets(); }
 	else         { DemoTargets.Reset(); }
