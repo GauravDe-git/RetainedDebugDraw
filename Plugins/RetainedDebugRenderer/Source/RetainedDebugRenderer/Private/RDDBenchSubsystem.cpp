@@ -12,6 +12,7 @@
 #include "RDDSubsystem.h"
 #include "RDDTypes.h"
 #include "RDDSceneProxy.h"
+#include "RDDShapes.h"
 
 namespace
 {
@@ -48,6 +49,24 @@ namespace
 
 		return FRDDLine(A, B, FColor(160, 0, 0));
 	}
+	
+	constexpr int32 SphereSegments = 12;
+	const FColor    ShapeColor(170, 0, 0);
+
+	struct FBenchShape
+	{
+		FVector Center;
+		float   Size;   // box half-extent, or sphere radius
+	};
+
+	/** Shared by both modes and both shapes. Separate statements fix the random-stream order. */
+	FBenchShape MakeBenchShape(FRandomStream& Rand)
+	{
+		const FVector Dir  = Rand.GetUnitVector();
+		const float   Dist = Rand.FRandRange(200.f, 3000.f);
+		const float   Size = Rand.FRandRange(20.f, 60.f);
+		return { Dir * Dist, Size };
+	}
 
 	const TCHAR* ModeName(ERDDBenchMode Mode)
 	{
@@ -67,9 +86,12 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	check(IsInGameThread());
 
-	if (Mode == ERDDBenchMode::Stock && StockLineCount > 0) { EmitStockLines(); }
-	if (StockBoxCount > 0)    { EmitStockBoxes(); }
-	if (StockSphereCount > 0) { EmitStockSpheres(); }
+	if (Mode == ERDDBenchMode::Stock)
+	{
+		if (StockLineCount > 0)   { EmitStockLines(); }
+		if (StockBoxCount > 0)    { EmitStockBoxes(); }
+		if (StockSphereCount > 0) { EmitStockSpheres(); }
+	}
 
 	// Spin line 0 through its handle: one line changes, the rest stay put.
 	if (bMoveOne && Mode == ERDDBenchMode::Retained && RetainedHandles.Num() > 0)
@@ -144,12 +166,14 @@ void URDDBenchSubsystem::SetStockBoxCount(int32 Count)
 {
 	check(IsInGameThread());
 	StockBoxCount = FMath::Max(0, Count);
+	RefreshRetainedLines();
 }
 
 void URDDBenchSubsystem::SetStockSphereCount(int32 Count)
 {
 	check(IsInGameThread());
 	StockSphereCount = FMath::Max(0, Count);
+	RefreshRetainedLines();
 }
 
 void URDDBenchSubsystem::ClearAll()
@@ -175,17 +199,12 @@ void URDDBenchSubsystem::EmitStockBoxes()
 	if (!World) { return; }
 
 	FRandomStream Rand(RDDSeed);
-
 	for (int32 i = 0; i < StockBoxCount; ++i)
 	{
-		const FVector Center = Rand.GetUnitVector() * Rand.FRandRange(200.f, 3000.f);
-		const FVector Extent(Rand.FRandRange(20.f, 60.f));
-
-		DrawDebugBox(World, Center, Extent, FColor(170, 0, 0),
-					 /*bPersistentLines=*/false,
-					 /*LifeTime=*/-1.f,
-					 /*DepthPriority=*/0,
-					 /*Thickness=*/0.f);
+		const FBenchShape Shape = MakeBenchShape(Rand);
+		DrawDebugBox(World, Shape.Center, FVector(Shape.Size), ShapeColor,
+					 /*bPersistentLines=*/false, /*LifeTime=*/-1.f,
+					 /*DepthPriority=*/0, /*Thickness=*/0.f);
 	}
 }
 
@@ -197,17 +216,12 @@ void URDDBenchSubsystem::EmitStockSpheres()
 	if (!World) { return; }
 
 	FRandomStream Rand(RDDSeed);
-
 	for (int32 i = 0; i < StockSphereCount; ++i)
 	{
-		const FVector Center = Rand.GetUnitVector() * Rand.FRandRange(200.f, 3000.f);
-
-		DrawDebugSphere(World, Center, Rand.FRandRange(20.f, 60.f),
-						/*Segments=*/12, FColor(170, 0, 0),
-						/*bPersistentLines=*/false,
-						/*LifeTime=*/-1.f,
-						/*DepthPriority=*/0,
-						/*Thickness=*/0.f);
+		const FBenchShape Shape = MakeBenchShape(Rand);
+		DrawDebugSphere(World, Shape.Center, Shape.Size, SphereSegments, ShapeColor,
+						/*bPersistentLines=*/false, /*LifeTime=*/-1.f,
+						/*DepthPriority=*/0, /*Thickness=*/0.f);
 	}
 }
 
@@ -440,18 +454,40 @@ void URDDBenchSubsystem::RefreshRetainedLines()
 	// Clearing released every line, so the old handles are all stale now.
 	RetainedHandles.Reset();
 
-	if (Mode != ERDDBenchMode::Retained || StockLineCount == 0)
-	{
-		return;
-	}
+	if (Mode != ERDDBenchMode::Retained) { return; }
+
+	const int32 TotalLines = StockLineCount
+						   + StockBoxCount    * 12
+						   + StockSphereCount * 2 * SphereSegments * SphereSegments;
+	if (TotalLines == 0) { return; }
 
 	TArray<FRDDLine> Lines;
-	Lines.Reserve(StockLineCount);
+	Lines.Reserve(TotalLines);
 
-	FRandomStream Rand(RDDSeed);
-	for (int32 i = 0; i < StockLineCount; ++i)
+	// Each shape type uses its own stream from the same seed — exactly as the
+	// stock emit functions do — so both modes generate identical shapes.
 	{
-		Lines.Add(MakeBenchLine(Rand));
+		FRandomStream Rand(RDDSeed);
+		for (int32 i = 0; i < StockLineCount; ++i)
+		{
+			Lines.Add(MakeBenchLine(Rand));
+		}
+	}
+	{
+		FRandomStream Rand(RDDSeed);
+		for (int32 i = 0; i < StockBoxCount; ++i)
+		{
+			const FBenchShape Shape = MakeBenchShape(Rand);
+			RDDShapes::AppendBox(Lines, Shape.Center, FVector(Shape.Size), ShapeColor);
+		}
+	}
+	{
+		FRandomStream Rand(RDDSeed);
+		for (int32 i = 0; i < StockSphereCount; ++i)
+		{
+			const FBenchShape Shape = MakeBenchShape(Rand);
+			RDDShapes::AppendSphere(Lines, Shape.Center, Shape.Size, SphereSegments, ShapeColor);
+		}
 	}
 
 	// Keep a handle for every line, so individual lines can be moved later.

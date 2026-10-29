@@ -49,6 +49,7 @@ FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	UMaterialInterface* Material = InComponent->GetLineMaterial();
 	MaterialProxy     = Material->GetRenderProxy();
 	MaterialRelevance = Material->GetRelevance_Concurrent(GetScene().GetFeatureLevel());
+	MaterialRelevance = Material->GetRelevance_Concurrent(GetScene().GetShaderPlatform());
 
 	NumVertices = Lines.Num() * 2;
 	if (NumVertices > 0)
