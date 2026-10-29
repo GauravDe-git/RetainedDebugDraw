@@ -23,7 +23,8 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 	
-	void AddLines(TConstArrayView<FRDDLine> Lines);
+	void AddLines(TConstArrayView<FRDDLine> Lines, TArray<FRDDHandle>* OutHandles = nullptr);
+	bool UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine);
 	void ClearLines();
 	int32 GetNumLines() const;
 	

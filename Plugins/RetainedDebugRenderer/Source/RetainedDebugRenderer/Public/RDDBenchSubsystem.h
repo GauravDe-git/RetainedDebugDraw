@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "RDDTypes.h"
 #include "RDDBenchSubsystem.generated.h"
 
 /**
@@ -34,6 +35,8 @@ public:
 	void SnapToBenchCamera();
 	
 	void SetMode(ERDDBenchMode NewMode);
+	
+	void SetMoveOne(bool bEnable);
 private:
 	void EmitStockLines();
 	void EmitStockBoxes();
@@ -59,4 +62,8 @@ private:
 	void RefreshRetainedLines();
 
 	ERDDBenchMode Mode = ERDDBenchMode::Stock;
+	
+	TArray<FRDDHandle> RetainedHandles;
+	bool  bMoveOne     = false;
+	float MoveOneTime  = 0.f;
 };

@@ -18,6 +18,26 @@ static TAutoConsoleVariable<int32> CVarRDDDrawPath(
 
 std::atomic<int32> FRDDSceneProxy::UploadCount{0};
 std::atomic<int64> FRDDSceneProxy::UploadedVertices{0};
+std::atomic<int64> FRDDSceneProxy::PartialWrites{0};
+std::atomic<int64> FRDDSceneProxy::PartialBytesWritten{0};
+
+namespace
+{
+	/** FColor is sRGB; the vertex colour stream is read as linear. One place, so build and update agree. */
+	FColor ToVertexColor(const FColor& Color)
+	{
+		return FLinearColor(Color).ToFColor(/*bSRGB=*/false);
+	}
+
+	/** Writes Size bytes at Offset into a GPU buffer, touching nothing else in it. */
+	void WriteRange(FRHICommandListImmediate& RHICmdList, FRHIBuffer* Buffer,
+					uint32 Offset, const void* Data, uint32 Size)
+	{
+		void* Dst = RHICmdList.LockBuffer(Buffer, Offset, Size, RLM_WriteOnly);
+		FMemory::Memcpy(Dst, Data, Size);
+		RHICmdList.UnlockBuffer(Buffer);
+	}
+}
 
 FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	: FPrimitiveSceneProxy{InComponent}
@@ -182,6 +202,36 @@ uint32 FRDDSceneProxy::GetMemoryFootprint() const
 	return sizeof(*this) + GetAllocatedSize();
 }
 
+void FRDDSceneProxy::UpdateSlot_RenderThread(FRHICommandListImmediate& RHICmdList,
+											 uint32 SlotIndex, const FRDDLine& Line)
+{
+	check(IsInRenderingThread());
+
+	const uint32 V0 = SlotIndex * 2;
+	if (V0 + 1 >= NumVertices)
+	{
+		// This proxy was built before the slot existed. A rebuild is
+		// already queued, and it'll read the new data from the slot.
+		return;
+	}
+
+	// Keep the render thread's copy in step, so the PDI path agrees too.
+	Lines[SlotIndex] = Line;
+
+	const FVector3f Positions[2] = { FVector3f(Line.Start), FVector3f(Line.End) };
+	const FColor    Color        = ToVertexColor(Line.Color);
+	const FColor    Colors[2]    = { Color, Color };
+
+	WriteRange(RHICmdList, VertexBuffers.PositionVertexBuffer.VertexBufferRHI,
+			   V0 * sizeof(FVector3f), Positions, sizeof(Positions));
+	WriteRange(RHICmdList, VertexBuffers.ColorVertexBuffer.VertexBufferRHI,
+			   V0 * sizeof(FColor), Colors, sizeof(Colors));
+
+	// Tangents and UVs are fixed placeholders, so they never need rewriting.
+	++PartialWrites;
+	PartialBytesWritten += sizeof(Positions) + sizeof(Colors);
+}
+
 uint32 FRDDSceneProxy::GetAllocatedSize() const
 {
 	return FPrimitiveSceneProxy::GetAllocatedSize() + Lines.GetAllocatedSize();
@@ -208,15 +258,9 @@ void FRDDSceneProxy::BuildVertexBuffers()
 		VertexBuffers.PositionVertexBuffer.VertexPosition(V0) = FVector3f(Line.Start);
 		VertexBuffers.PositionVertexBuffer.VertexPosition(V1) = FVector3f(Line.End);
 
-		VertexBuffers.ColorVertexBuffer.VertexColor(V0) = Line.Color;
-		VertexBuffers.ColorVertexBuffer.VertexColor(V1) = Line.Color;
-		
-		// FColor is sRGB-encoded, but the vertex color stream is read as linear.
-		// Converting here so the GPU gets the same linear value the PDI path uses.
-		const FColor LinearColor = FLinearColor(Line.Color).ToFColor(/*bSRGB=*/false);
-
-		VertexBuffers.ColorVertexBuffer.VertexColor(V0) = LinearColor;
-		VertexBuffers.ColorVertexBuffer.VertexColor(V1) = LinearColor;
+		const FColor VertexColor = ToVertexColor(Line.Color);
+		VertexBuffers.ColorVertexBuffer.VertexColor(V0) = VertexColor;
+		VertexBuffers.ColorVertexBuffer.VertexColor(V1) = VertexColor;
 		
 		// The standard vertex factory expects a tangent basis and a UV.
 		// Lines use neither, so these are fixed placeholders.

@@ -33,16 +33,21 @@ void URDDSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-void URDDSubsystem::AddLines(TConstArrayView<FRDDLine> Lines)
+void URDDSubsystem::AddLines(TConstArrayView<FRDDLine> Lines, TArray<FRDDHandle>* OutHandles)
 {
 	check(IsInGameThread());
-
 	if (!Component)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("RDD: AddLines called before world begin play: ignored"));
 		return;
 	}
-	Component->AddLines(Lines);
+	Component->AddLines(Lines, OutHandles);
+}
+
+bool URDDSubsystem::UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine)
+{
+	check(IsInGameThread());
+	return Component && Component->UpdateLine(Handle, NewLine);
 }
 
 void URDDSubsystem::ClearLines()

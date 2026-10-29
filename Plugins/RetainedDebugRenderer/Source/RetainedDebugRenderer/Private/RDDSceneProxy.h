@@ -38,6 +38,13 @@ public:
 	static int32 GetUploadCount()     { return UploadCount.load(); }
 	static int64 GetUploadedVertices() { return UploadedVertices.load(); }
 	
+	/** Render thread: rewrite one slot's two vertices in place, without a rebuild. */
+	void UpdateSlot_RenderThread(FRHICommandListImmediate& RHICmdList,
+								 uint32 SlotIndex, const FRDDLine& Line);
+
+	static int64 GetPartialWrites()      { return PartialWrites.load(); }
+	static int64 GetPartialBytesWritten() { return PartialBytesWritten.load(); }
+	
 private:
 	uint32 GetAllocatedSize() const;
 	
@@ -59,4 +66,7 @@ private:
 	// Atomic because proxies can be constructed off the game thread.
 	static std::atomic<int32> UploadCount;
 	static std::atomic<int64> UploadedVertices;
+	
+	static std::atomic<int64> PartialWrites;
+	static std::atomic<int64> PartialBytesWritten;
 };

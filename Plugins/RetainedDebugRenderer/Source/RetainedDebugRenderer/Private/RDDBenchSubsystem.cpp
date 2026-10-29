@@ -71,17 +71,35 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 	if (StockBoxCount > 0)    { EmitStockBoxes(); }
 	if (StockSphereCount > 0) { EmitStockSpheres(); }
 
+	// Spin line 0 through its handle: one line changes, the rest stay put.
+	if (bMoveOne && Mode == ERDDBenchMode::Retained && RetainedHandles.Num() > 0)
+	{
+		MoveOneTime += DeltaTime;
+		const FVector Dir(FMath::Cos(MoveOneTime), FMath::Sin(MoveOneTime), 0.f);
+		const FRDDLine Spinner(FVector::ZeroVector, Dir * 1500.f, FColor::Yellow);
+
+		if (URDDSubsystem* RDD = GetWorld() ? GetWorld()->GetSubsystem<URDDSubsystem>() : nullptr)
+		{
+			RDD->UpdateLine(RetainedHandles[0], Spinner);
+		}
+	}
+
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(
 			1, 0.f, FColor::Yellow,
 			FString::Printf(TEXT("Retained Draw | %s | Path:%d | L:%d B:%d S:%d"),
 				ModeName(Mode), GetDrawPath(), StockLineCount, StockBoxCount, StockSphereCount));
-		
+
 		GEngine->AddOnScreenDebugMessage(
-		2, 0.f, FColor::Cyan,
-		FString::Printf(TEXT("RDD buffer uploads: %d (%lld vertices total)"),
-			FRDDSceneProxy::GetUploadCount(), FRDDSceneProxy::GetUploadedVertices()));
+			2, 0.f, FColor::Cyan,
+			FString::Printf(TEXT("RDD buffer uploads: %d (%lld vertices total)"),
+				FRDDSceneProxy::GetUploadCount(), FRDDSceneProxy::GetUploadedVertices()));
+
+		GEngine->AddOnScreenDebugMessage(
+			3, 0.f, FColor::Cyan,
+			FString::Printf(TEXT("RDD partial writes: %lld (%lld bytes total)"),
+				FRDDSceneProxy::GetPartialWrites(), FRDDSceneProxy::GetPartialBytesWritten()));
 	}
 
 	if (bCapturing)
@@ -354,6 +372,13 @@ void URDDBenchSubsystem::SetMode(ERDDBenchMode NewMode)
 	RefreshRetainedLines();
 }
 
+void URDDBenchSubsystem::SetMoveOne(bool bEnable)
+{
+	check(IsInGameThread());
+	bMoveOne    = bEnable;
+	MoveOneTime = 0.f;
+}
+
 void URDDBenchSubsystem::RefreshRetainedLines()
 {
 	check(IsInGameThread());
@@ -365,6 +390,9 @@ void URDDBenchSubsystem::RefreshRetainedLines()
 	// Always clear first: AddLines appends, so re-submitting without
 	// clearing would draw everything twice.
 	RDD->ClearLines();
+
+	// Clearing released every line, so the old handles are all stale now.
+	RetainedHandles.Reset();
 
 	if (Mode != ERDDBenchMode::Retained || StockLineCount == 0)
 	{
@@ -380,7 +408,8 @@ void URDDBenchSubsystem::RefreshRetainedLines()
 		Lines.Add(MakeBenchLine(Rand));
 	}
 
-	RDD->AddLines(Lines);
+	// Keep a handle for every line, so individual lines can be moved later.
+	RDD->AddLines(Lines, &RetainedHandles);
 }
 
 static FAutoConsoleCommandWithWorldAndArgs GRDDStressBoxes(
@@ -467,5 +496,20 @@ static FAutoConsoleCommandWithWorldAndArgs GRDDStressMode(
 				Sub->SetMode(M == 1 ? ERDDBenchMode::Retained : ERDDBenchMode::Stock);
 				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.Mode -> %s"),
 					   M == 1 ? TEXT("RETAINED") : TEXT("STOCK"));
+			}
+		}));
+
+static FAutoConsoleCommandWithWorldAndArgs GRDDStressMoveOne(
+	TEXT("RDD.Stress.MoveOne"),
+	TEXT("1 = spin one retained line every frame through its handle, 0 = stop."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda(
+		[](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World) { return; }
+			if (URDDBenchSubsystem* Sub = World->GetSubsystem<URDDBenchSubsystem>())
+			{
+				const bool bEnable = Args.Num() > 0 && FCString::Atoi(*Args[0]) != 0;
+				Sub->SetMoveOne(bEnable);
+				UE_LOG(LogTemp, Warning, TEXT("RDD.Stress.MoveOne -> %d"), bEnable ? 1 : 0);
 			}
 		}));

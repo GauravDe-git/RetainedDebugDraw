@@ -19,6 +19,8 @@ public:
 	URDDComponent();
 
 	FRDDHandle SubmitLine(const FRDDLine& Line);
+	/** Moves or recolours one line without rebuilding the proxy. */
+	bool UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine);
 	bool       ReleaseLine(FRDDHandle Handle);
 	bool       IsValidHandle(FRDDHandle Handle) const;
 	bool       GetLine(FRDDHandle Handle, FRDDLine& OutLine) const;

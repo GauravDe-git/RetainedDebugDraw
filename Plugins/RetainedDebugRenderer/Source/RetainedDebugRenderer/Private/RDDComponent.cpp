@@ -29,6 +29,31 @@ FRDDHandle URDDComponent::SubmitLine(const FRDDLine& Line)
 	return Handle;
 }
 
+bool URDDComponent::UpdateLine(FRDDHandle Handle, const FRDDLine& NewLine)
+{
+	check(IsInGameThread());
+	if (!IsValidHandle(Handle)) { return false; }
+
+	// The slot stays the source of truth, so any later rebuild picks this up.
+	Slots[Handle.Index].Line = NewLine;
+
+	// Deliberately not MarkRenderStateDirty: that would rebuild everything.
+	// Send only this slot to the proxy that's already alive.
+	//
+	// Capturing the proxy pointer is safe: its deletion is queued on the
+	// render thread after this command, and render commands run in order.
+	if (FRDDSceneProxy* Proxy = static_cast<FRDDSceneProxy*>(SceneProxy))
+	{
+		const uint32 SlotIndex = Handle.Index;
+		ENQUEUE_RENDER_COMMAND(RDDUpdateLine)(
+			[Proxy, SlotIndex, NewLine](FRHICommandListImmediate& RHICmdList)
+			{
+				Proxy->UpdateSlot_RenderThread(RHICmdList, SlotIndex, NewLine);
+			});
+	}
+	return true;
+}
+
 bool URDDComponent::ReleaseLine(FRDDHandle Handle)
 {
 	check(IsInGameThread());
