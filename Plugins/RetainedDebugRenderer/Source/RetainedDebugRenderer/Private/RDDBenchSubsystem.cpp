@@ -11,6 +11,7 @@
 #include "GameFramework/PlayerController.h"
 #include "RDDSubsystem.h"
 #include "RDDTypes.h"
+#include "RDDSceneProxy.h"
 
 namespace
 {
@@ -76,6 +77,11 @@ void URDDBenchSubsystem::Tick(float DeltaTime)
 			1, 0.f, FColor::Yellow,
 			FString::Printf(TEXT("Retained Draw | %s | Path:%d | L:%d B:%d S:%d"),
 				ModeName(Mode), GetDrawPath(), StockLineCount, StockBoxCount, StockSphereCount));
+		
+		GEngine->AddOnScreenDebugMessage(
+		2, 0.f, FColor::Cyan,
+		FString::Printf(TEXT("RDD buffer uploads: %d (%lld vertices total)"),
+			FRDDSceneProxy::GetUploadCount(), FRDDSceneProxy::GetUploadedVertices()));
 	}
 
 	if (bCapturing)

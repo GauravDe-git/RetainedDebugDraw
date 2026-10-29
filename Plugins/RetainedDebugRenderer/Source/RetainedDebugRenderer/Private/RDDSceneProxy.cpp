@@ -16,6 +16,9 @@ static TAutoConsoleVariable<int32> CVarRDDDrawPath(
 	TEXT("0 = draw nothing (to isolate buffer memory), 1 = PDI path (stage A), 2 = persistent buffer."),
 	ECVF_RenderThreadSafe);
 
+std::atomic<int32> FRDDSceneProxy::UploadCount{0};
+std::atomic<int64> FRDDSceneProxy::UploadedVertices{0};
+
 FRDDSceneProxy::FRDDSceneProxy(const URDDComponent* InComponent)
 	: FPrimitiveSceneProxy{InComponent}
 , Lines{InComponent->GetLines()} // full copy, not ref
@@ -183,6 +186,8 @@ void FRDDSceneProxy::BuildVertexBuffers()
 	// bNeedsCPUAccess = false; the CPU-side copy is freed once it's been uploaded
 	// so the data lives only on the GPU.
 	
+	TRACE_CPUPROFILER_EVENT_SCOPE(RDD_BuildVertexBuffers);
+	
 	VertexBuffers.PositionVertexBuffer.Init(NumVertices, /*bNeedsCPUAccess=*/false);
 	VertexBuffers.ColorVertexBuffer.Init(NumVertices, /*bNeedsCPUAccess=*/false);
 	VertexBuffers.StaticMeshVertexBuffer.Init(NumVertices, /*NumTexCoords=*/1, /*bNeedsCPUAccess=*/false);
@@ -231,6 +236,9 @@ void FRDDSceneProxy::BuildVertexBuffers()
 		IndexBuffer.Indices[i] = i;
 	}
 	BeginInitResource(&IndexBuffer);
+	
+	++UploadCount;
+	UploadedVertices += NumVertices;
 }
 
 void FRDDSceneProxy::InitVertexFactory()

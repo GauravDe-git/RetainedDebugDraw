@@ -9,6 +9,8 @@
 #include "MaterialShared.h"            // FMaterialRelevance
 #include "StaticMeshResources.h"
 
+#include <atomic>
+
 class URDDComponent;
 
 /**
@@ -32,6 +34,10 @@ public:
 	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override;
 	virtual uint32 GetMemoryFootprint() const override;
 	
+	/** Total GPU buffer builds since startup, for the bench overlay. */
+	static int32 GetUploadCount()     { return UploadCount.load(); }
+	static int64 GetUploadedVertices() { return UploadedVertices.load(); }
+	
 private:
 	uint32 GetAllocatedSize() const;
 	
@@ -49,4 +55,8 @@ private:
 	uint32 NumVertices = 0;
 	
 	TArray<FRDDLine> Lines;
+	
+	// Atomic because proxies can be constructed off the game thread.
+	static std::atomic<int32> UploadCount;
+	static std::atomic<int64> UploadedVertices;
 };
